@@ -8,7 +8,6 @@
   (:export)) ; TODO
 (in-package #:dominions-parser/structures)
 
-;;; GENERAL TODO: Fixed-value magic numbers (read-and-assert).
 ;;; GENERAL TODO: There's one kind of map used in dominion, two more used in fatherland, and also the sparse array which is distinct from all three of those. Try to reduce that down to fewer, more parametrizable maps.
 ;;; GENERAL TODO: A bunch of things defined as "types" that it might be nice to have as classes? Or that might not be necessary.
 
@@ -31,7 +30,7 @@
                  when (< key filter) do (write-value raw-bytes out value :length 1)
                  finally (write-value p:i32 out -1))))
 
-(define-binary-type length-capped-terminated-map (key-type value-type terminator (max-length 64))
+(define-binary-type length-capped-terminated-map (key-type value-type terminator max-length)
   ;; Key-value pairs, terminated by a specific key of known type OR by reaching a set max length.
   ;; If max length is reached, no terminator is present.
   ;; Used specifically in dominion structure
@@ -56,7 +55,7 @@
            (loop repeat length
                  collecting (read-value value-type in)))
   (:writer (out values)
-           ;; NOTE currently does not check against length
+           ;; TODO currently does not check against length
            (loop for item in values
                  do (write-value value-type out item))))
 
@@ -102,7 +101,7 @@
    (name p:dom-string-term)
    (unk-u32-00 p:u32)
    (unk-u32-01 p:u32)
-   (unk-map (length-capped-terminated-map :key-type p:i32 :value-type p:i32 :terminator 0))))
+   (unk-map (length-capped-terminated-map :key-type p:i32 :value-type p:i32 :terminator 0 :max-length 64))))
 
 (define-binary-class enchantment-data ()
   ((sentinel (p:sentinel :type p:i16 :expected 26812))
@@ -140,7 +139,7 @@
    (event-occurrences ...) ; TODO first a value which must be >= 4474. Then either 1000 events, or (if the value was exactly 4475) an i32 saying how many events there are. Each event is an i16.
    (delayed-events-sentinel (p:sentinel :type p:i32 :expected 4480))
    (delayed-events delayed-events)
-   (closing-sentinel (p:sentinel :type p:i32 :expected 12346)) ; TODO assert the file is over
+   (closing-sentinel (p:sentinel :type p:i32 :expected 12346)))) ; TODO assert the file is over
 
 (define-binary-class header ()
   ((signature (raw-bytes :length 6)) ; TODO assert is #x01 #x02 #x04 #x44 #x4F #x4D

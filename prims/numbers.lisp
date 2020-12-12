@@ -7,14 +7,15 @@
   (:export #:u8 #:u16 #:u32 #:u64
            #:i8 #:i16 #:i32 #:i64
            #:f32 #:f32-special
-           #:var-len-int))
+           #:var-len-int
+           #:sentinel))
 (in-package #:dominions-parser/prims/numbers)
 
 ;;; -----
 ;;; Normal integers, arbitrary length (8-bit bytes), either endianness
 ;;; -----
 
-(define-binary-type unsigned-int ((length 1) (is-big nil))
+(define-binary-type unsigned-int (length is-big)
   (:reader (in)
             (loop with result = 0
                   with cap = (max-offset length)
@@ -29,12 +30,12 @@
                  for v = (if is-big i (- cap i)) ; inverse of reader
                  do (write-byte (ldb (byte 8 v) value) out))))
 
-(define-binary-type signed-int ((length 1) (is-big nil))
+(define-binary-type signed-int (length is-big)
   ;; NOTE: CL's bitwise ops always return positive integers, and when given negatives,
   ;; treat them as twos-complement of minimal bit length.
   (:reader (in)
            (declare ((integer 0) length))
-           (let ((unsigned (read-value 'unsigned-int :length length :is-big is-big)))
+           (let ((unsigned (read-value 'unsigned-int in :length length :is-big is-big)))
              (unsigned-to-twos-comp unsigned (* 8 length))))
   (:writer (out value)
            (declare (integer value))
@@ -113,14 +114,14 @@
 ;;; TODO set this up as proper errors with abort/ignore/replace resolutions, instead of warning prints.
 (define-binary-type sentinel (type expected)
   (:reader (in)
-           (let ((actual (read-value type)))
+           (let ((actual (read-value type in)))
              (unless (eql actual expected)
                (format t "WARNING: Read ~S, but expected ~S (sentinel/magic)~%" actual expected))
              actual))
   (:writer (out value)
            (unless (eql value expected)
              (format t "WARNING: Writing ~S for expected ~S (sentinel/magic)~%" value expected))
-           (write-value num-type out value)))
+           (write-value type out value)))
 
 ;;; -----
 ;;; Useful math and twiddles for implementation
