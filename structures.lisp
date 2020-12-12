@@ -24,16 +24,16 @@
   ;; - only end on a key of -1
   ;; my slightly different implementation allows looking at the discarded stuff without altering the writeback.
   (:reader (in)
-           (loop for key = (read-value p:i32)
+           (loop for key = (read-value 'p:i32)
                  until (eql key -1)
                  collecting (if (>= key 0)
-                                (cons key (read-value raw-bytes in :length 1))
+                                (cons key (read-value 'raw-bytes in :length 1))
                                 (cons key 'nil))))
   (:writer (out pairs)
            (loop for (key . value) in pairs
-                 do (write-value p:i32 out key)
-                 when (< key filter) do (write-value raw-bytes out value :length 1)
-                 finally (write-value p:i32 out -1))))
+                 do (write-value 'p:i32 out key)
+                 when (< key filter) do (write-value 'raw-bytes out value :length 1)
+                 finally (write-value 'p:i32 out -1))))
 
 (define-binary-type length-capped-terminated-map (key-type value-type terminator max-length)
   ;; Key-value pairs, terminated by a specific key of known type OR by reaching a set max length.
@@ -82,11 +82,11 @@
 (define-binary-type variable-length-list (length-type value-type)
   (:reader (in)
            (let ((length (read-value length-type in)))
-             (read-value fixed-length-list :length length :value-type value-type)))
+             (read-value 'fixed-length-list :length length :value-type value-type)))
   (:writer (out values)
            (let ((length (length values)))
              (write-value length-type out length)
-             (write-value fixed-length-list out values :length length :value-type value-type))))
+             (write-value 'fixed-length-list out values :length length :value-type value-type))))
 
 ;;; General NOTE: Lots of these structures have unknown fields. I am reading
 ;;; them as lists where the types are consistent for long blocks, for
@@ -96,10 +96,10 @@
 (define-binary-class commander ()
   ;; lot of unknown fields. Go code reads individually.
   ((name p:string-term)
-   (unk-6x32 (fixed-length-list :length 6 :value-type p:u32))
-   (unk-16x16 (fixed-length-list :length 16 :value-type p:u16))
-   (unk-5x32 (fixed-length-list :length 5 :value-type p:u32))
-   (unk-9x16 (fixed-length-list :length 9 :value-type p:u16))
+   (unk-6x32 (fixed-length-list :length 6 :value-type 'p:u32))
+   (unk-16x16 (fixed-length-list :length 16 :value-type 'p:u16))
+   (unk-5x32 (fixed-length-list :length 5 :value-type 'p:u32))
+   (unk-9x16 (fixed-length-list :length 9 :value-type 'p:u16))
    (unk-byte-array (raw-bytes :length 51)) ; Go code notes "46 + 5" without clarification?
    (unk-16-25 p:u16)))
 
@@ -109,19 +109,19 @@
 ;;; use the same read/write interface, maybe.
 
 (define-binary-class dominion ()
-  ((sentinel (p:sentinel :type p:u16 :expected 12346))
+  ((sentinel (p:sentinel :type 'p:u16 :expected 12346))
    (b08l06 (raw-bytes :length 6))
    (name p:string-term)
    (unk-u32-00 p:u32)
    (unk-u32-01 p:u32)
-   (unk-map (length-capped-terminated-map :key-type p:i32 :value-type p:i32 :terminator 0 :max-length 64))))
+   (unk-map (length-capped-terminated-map :key-type 'p:i32 :value-type 'p:i32 :terminator 0 :max-length 64))))
 
 (define-binary-class enchantment-data ()
   ;; Go code has these as ints. Reads individually.
-  ((sentinel (p:sentinel :type p:i16 :expected 26812))
+  ((sentinel (p:sentinel :type 'p:i16 :expected 26812))
    (unk-i32-00 p:i32)
-   (unk-6x16 (fixed-length-list :length 6 :value-type p:i16))
-   (unk-5x32 (fixed-length-list :length 5 :value-type p:i32))
+   (unk-6x16 (fixed-length-list :length 6 :value-type 'p:i16))
+   (unk-5x32 (fixed-length-list :length 5 :value-type 'p:i32))
    (unk-i16-06 p:i16)))
 
 ;;; TODO: End-stats. Eight lists of i16, with a single prefixing length.
@@ -139,24 +139,25 @@
    (settings settings)
    (calendars calendars) ; TODO two maps interleaved, sharing keys, term negative or >999, signature #x205B after term
    (zoom ...) ; TODO uncertain of type; Go uses "binary.LittleEndian"
-   (lands (negative-terminated-map :key-type p:i32 :value-type land)) ; TODO error over #x5E0
-   (kingdoms (negative-terminated-map :key-type p:i32 :value-type kingdom)) ; TODO error over #xF9
-   (units (negative-terminated-map :key-type p:i32 :value-type unit))
-   (commanders (negative-terminated-map :key-type p:i32 :value-type commander))
-   (dominions (negative-terminated-map :key-type p:i32 :value-type dominion))
-   (spells (negative-terminated-map :key-type p:i32 :value-type spell-data))
-   (mercenaries (negative-terminated-map :key-type p:i32 :value-type mercenary-data)) ; NOTE: Go code comments "something weird"
+   ;; NOTE: in the Go, the lands read here are the "treatAsFatherland" variant.
+   (lands (negative-terminated-map :key-type 'p:i32 :value-type 'land)) ; TODO error over #x5E0
+   (kingdoms (negative-terminated-map :key-type 'p:i32 :value-type 'kingdom)) ; TODO error over #xF9
+   (units (negative-terminated-map :key-type 'p:i32 :value-type 'unit))
+   (commanders (negative-terminated-map :key-type 'p:i32 :value-type 'commander))
+   (dominions (negative-terminated-map :key-type 'p:i32 :value-type 'dominion))
+   (spells (negative-terminated-map :key-type 'p:i32 :value-type 'spell-data))
+   (mercenaries (negative-terminated-map :key-type 'p:i32 :value-type 'mercenary-data)) ; NOTE: Go code comments "something weird"
    (merc-unknown (raw-bytes :length 100))
-   (enchantments (negative-terminated-map :key-type p:i32 :value-type enchantment-data))
+   (enchantments (negative-terminated-map :key-type 'p:i32 :value-type 'enchantment-data))
    (items (raw-bytes :length 1000))
    (war-data (raw-bytes :length 40000)) ; what??
-   (heroes (variable-length-list :length-type p:i32 :value-type p:i16))
-   (unk-rolling (fixed-length-list :length 200 :value-type rxor-50))
+   (heroes (variable-length-list :length-type 'p:i32 :value-type 'p:i16))
+   (unk-rolling (fixed-length-list :length 200 :value-type 'rxor-50))
    (end-stats end-stats)
    (event-occurrences ...) ; TODO first a value which must be >= 4474. Then either 1000 events, or (if the value was exactly 4475) an i32 saying how many events there are. Each event is an i16.
-   (delayed-events-sentinel (p:sentinel :type p:i32 :expected 4480))
+   (delayed-events-sentinel (p:sentinel :type 'p:i32 :expected 4480))
    (delayed-events delayed-events)
-   (closing-sentinel (p:sentinel :type p:i32 :expected 12346)))) ; TODO assert the file is over
+   (closing-sentinel (p:sentinel :type 'p:i32 :expected 12346)))) ; TODO assert the file is over
 
 (define-binary-class header ()
   ((signature (raw-bytes :length 6)) ; TODO assert is #x01 #x02 #x04 #x44 #x4F #x4D
@@ -172,7 +173,7 @@
    (password p:string-rxor-term)
    (master-password p:string-rxor-term)
    (turn-key p:i32)
-   (sentinel (p:sentinel :type p:i32 :expected 12346))))
+   (sentinel (p:sentinel :type 'p:i32 :expected 12346))))
 
 ;;; TODO: Kingdom. Bunch of unknown stuff here. Go code doesn't even save most of it, just discards.
 
@@ -183,14 +184,14 @@
 
 (define-binary-class spell-data ()
   ;; Go code reads as arrays.
-  ((unk-16-x1000 (fixed-length-list :length 1000 :value-type p:u16))
-   (unk-16-x24 (fixed-length-list :length 24 :value-type p:u16))))
+  ((unk-16-x1000 (fixed-length-list :length 1000 :value-type 'p:u16))
+   (unk-16-x24 (fixed-length-list :length 24 :value-type 'p:u16))))
 
 (define-binary-class unit ()
   ;; lot of unknown fields, Go code notes array structure but reads individually?
-  ((unk-3x64 (fixed-length-list :length 3 :value-type p:u64))
+  ((unk-3x64 (fixed-length-list :length 3 :value-type 'p:u64))
    (unk-32-a-00 p:u32)
-   (unk-14x16 (fixed-length-list :length 14 :value-type p:u16))
+   (unk-14x16 (fixed-length-list :length 14 :value-type 'p:u16))
    ;; Go notes this u16 as separate from the previous array of 14
    (unk-16-b p:u16)
    (unk-byte-00 (raw-bytes :length 1))
