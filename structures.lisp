@@ -88,26 +88,19 @@
              (write-value length-type out length)
              (write-value fixed-length-list out values :length length :value-type value-type))))
 
+;;; General NOTE: Lots of these structures have unknown fields. I am reading
+;;; them as lists where the types are consistent for long blocks, for
+;;; conciseness. I make notes in each class as to whether its unknown-meaning
+;;; lists were read individually or as arrays in the Go code.
+
 (define-binary-class commander ()
-  ;; lot of unknown fields.
+  ;; lot of unknown fields. Go code reads individually.
   ((name p:string-term)
-   ;; first some u32
-   (unk-32-00 p:u32) (unk-32-01 p:u32) (unk-32-02 p:u32) (unk-32-03 p:u32)
-   (unk-32-04 p:u32) (unk-32-05 p:u32)
-   ;; then some u16
-   (unk-16-00 p:u16) (unk-16-01 p:u16) (unk-16-02 p:u16) (unk-16-03 p:u16)
-   (unk-16-04 p:u16) (unk-16-05 p:u16) (unk-16-06 p:u16) (unk-16-07 p:u16)
-   (unk-16-08 p:u16) (unk-16-09 p:u16) (unk-16-10 p:u16) (unk-16-11 p:u16)
-   (unk-16-12 p:u16) (unk-16-13 p:u16) (unk-16-14 p:u16) (unk-16-15 p:u16)
-   ;; more u32
-   (unk-32-06 p:u32) (unk-32-07 p:u32) (unk-32-08 p:u32) (unk-32-09 p:u32)
-   (unk-32-10 p:u32)
-   ;; more u16
-   (unk-16-16 p:u16) (unk-16-17 p:u16) (unk-16-18 p:u16) (unk-16-19 p:u16)
-   (unk-16-20 p:u16) (unk-16-21 p:u16) (unk-16-22 p:u16) (unk-16-23 p:u16)
-   (unk-16-24 p:u16)
-   ;; and then 51 bytes and another u16
-   (unk-byte-array (raw-bytes :length 51))
+   (unk-6x32 (fixed-length-list :length 6 :value-type p:u32))
+   (unk-16x16 (fixed-length-list :length 16 :value-type p:u16))
+   (unk-5x32 (fixed-length-list :length 5 :value-type p:u32))
+   (unk-9x16 (fixed-length-list :length 9 :value-type p:u16))
+   (unk-byte-array (raw-bytes :length 51)) ; Go code notes "46 + 5" without clarification?
    (unk-16-25 p:u16)))
 
 ;;; TODO: Delayed events. Three lists of i32, interleaved, with a single prefixing length.
@@ -124,12 +117,11 @@
    (unk-map (length-capped-terminated-map :key-type p:i32 :value-type p:i32 :terminator 0 :max-length 64))))
 
 (define-binary-class enchantment-data ()
+  ;; Go code has these as ints. Reads individually.
   ((sentinel (p:sentinel :type p:i16 :expected 26812))
    (unk-i32-00 p:i32)
-   (unk-i16-00 p:i16) (unk-i16-01 p:i16) (unk-i16-02 p:i16) (unk-i16-03 p:i16)
-   (unk-i16-04 p:i16) (unk-i16-05 p:i16)
-   (unk-i32-01 p:i32) (unk-i32-02 p:i32) (unk-i32-03 p:i32) (unk-i32-04 p:i32)
-   (unk-i32-05 p:i32)
+   (unk-6x16 (fixed-length-list :length 6 :value-type p:i16))
+   (unk-5x32 (fixed-length-list :length 5 :value-type p:i32))
    (unk-i16-06 p:i16)))
 
 ;;; TODO: End-stats. Eight lists of i16, with a single prefixing length.
@@ -137,6 +129,9 @@
 ;;; Maybe corresponds to score graphs?
 
 (define-binary-type rxor-50 () (p:string-rxor :length 50)) ; used in fatherland, can't pass keys for nested types
+
+;;; TODO "calendars" (paired, interleaved, shared-keys maps? multiple
+;;; termination rules, post-termination signature. used in fatherland)
 
 (define-binary-class fatherland ()
   ;; The top-level structure of the file
@@ -179,10 +174,25 @@
    (turn-key p:i32)
    (sentinel (p:sentinel :type p:i32 :expected 12346))))
 
-;;; TODO: Kingdom. Bunch of unknown stuff here. Fixed length, though.
+;;; TODO: Kingdom. Bunch of unknown stuff here. Go code doesn't even save most of it, just discards.
 
 ;;; TODO: Land
 ;;; TODO: Mercenary data
+;;; TODO: Newlord
 ;;; TODO: Settings
-;;; TODO: Spell data
-;;; TODO: Unit
+
+(define-binary-class spell-data ()
+  ;; Go code reads as arrays.
+  ((unk-16-x1000 (fixed-length-list :length 1000 :value-type p:u16))
+   (unk-16-x24 (fixed-length-list :length 24 :value-type p:u16))))
+
+(define-binary-class unit ()
+  ;; lot of unknown fields, Go code notes array structure but reads individually?
+  ((unk-3x64 (fixed-length-list :length 3 :value-type p:u64))
+   (unk-32-a-00 p:u32)
+   (unk-14x16 (fixed-length-list :length 14 :value-type p:u16))
+   ;; Go notes this u16 as separate from the previous array of 14
+   (unk-16-b p:u16)
+   (unk-byte-00 (raw-bytes :length 1))
+   (unk32-01 p:u32)
+   (unk-byte-01 (raw-bytes :length 1))))
