@@ -7,10 +7,11 @@ in hopes of providing new methods of game analysis (and mod debugging).
 It is currently very much in-progress. Much of the structure currently present
 is based on
 [dominions4.gamedata](https://github.com/blitzserver/dominions4.gamedata),
-which is a fork of a similar project that started on Dominions 4 or possibly 3,
-and which appears to be based on a decompilation and/or ptrace (judging by how
-it parses specific sequences of values of known size and ordering but unknown
-meaning).
+which is a fork of a similar project that started as Python code for parsing
+Dominions 3 saves, and was redeveloped into Go code parsing Dominions 4 saves.
+It is incomplete, and appears to be based on a decompilation and/or ptrace
+(judging by how it parses specific sequences of values of known size and
+ordering but unknown meaning).
 
 My current plans are:
 
