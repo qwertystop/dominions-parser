@@ -8,8 +8,6 @@
   (:export)) ; TODO
 (in-package #:dominions-parser/structures)
 
-;;; TODO: Re-implement binparse to import from and extend PCL instead of duping it, for license purposes. This should be done before putting the project on github, and *that* should be done ASAP.
-
 ;;; GENERAL TODO: Fixed-value magic numbers (read-and-assert).
 ;;; GENERAL TODO: There's one kind of map used in dominion, two more used in fatherland, and also the sparse array which is distinct from all three of those. Try to reduce that down to fewer, more parametrizable maps.
 ;;; GENERAL TODO: A bunch of things defined as "types" that it might be nice to have as classes? Or that might not be necessary.
