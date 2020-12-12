@@ -8,7 +8,12 @@
   (:export)) ; TODO
 (in-package #:dominions-parser/structures)
 
-;;; GENERAL TODO: There's one kind of map used in dominion, two more used in fatherland, and also the sparse array which is distinct from all three of those. Try to reduce that down to fewer, more parametrizable maps.
+;;; GENERAL TODO: There's one kind of map used in dominion (single terminator,
+;;; or auto-terminate at max length), two more used in fatherland (any negative
+;;; is terminator, error rather than auto-term at max length, or no max length),
+;;; and also the sparse array (single terminator, multiple rules for skipping or
+;;; discarding values based on keys). Try to reduce that down to fewer, more
+;;; parametrizable maps.
 ;;; GENERAL TODO: A bunch of things defined as "types" that it might be nice to have as classes? Or that might not be necessary.
 
 (define-binary-type dom-sparse-array (filter)
@@ -24,8 +29,8 @@
                  collecting (if (>= key 0)
                                 (cons key (read-value raw-bytes in :length 1))
                                 (cons key 'nil))))
-  (:writer (out values)
-           (loop for (key . value) in values
+  (:writer (out pairs)
+           (loop for (key . value) in pairs
                  do (write-value p:i32 out key)
                  when (< key filter) do (write-value raw-bytes out value :length 1)
                  finally (write-value p:i32 out -1))))
@@ -40,14 +45,29 @@
                  until (eql key terminator)
                  for value = (read-value value-type in)
                  collecting (cons key value)))
-  (:writer (out values)
+  (:writer (out pairs)
            ;; TODO currently silently discards input in excess of max length
-           (loop for (key . value) in values
+           (loop for (key . value) in pairs
                  for count from 1 upto max-length
                  do (progn (write-value key-type out key)
                            (write-value value-type out value))
                  finally (if (> max-length count) ; list shorter than max
                              (write-value key-type out terminator)))))
+
+(define-binary-type negative-terminated-map (key-type value-type)
+  ;; Key-value pairs, terminated by any negative-number key (key-type must be numeric)
+  ;; TODO Go code has *errors* if the length exceeds a limit
+  ;; (rather than the auto-termination in length-capped-terminated-map)
+  (:reader (in)
+           (loop for key = (read-value key-type in)
+                 until (< key 0) ; TODO should it save the specific terminator?
+                 for value = (read-value value-type in)
+                 collecting (cons key value)))
+  (:writer (out pairs)
+           (loop for (key . value) in values
+                 do (progn (write-value key-type out key)
+                           (write-value value-type out value))
+                 finally (write-value key-type out -1)))) ; TODO if we save the specific terminator, use that.
 
 (define-binary-type fixed-length-list (length value-type)
   ;; Array of fixed size, determined by outside context.
@@ -122,15 +142,15 @@
    (settings settings)
    (calendars calendars) ; TODO two maps interleaved, sharing keys, term negative or >999, signature #x205B after term
    (zoom ...) ; TODO uncertain of type; Go uses "binary.LittleEndian"
-   (lands ...) ; TODO map i32->land, term negative, error over #x5E0
-   (kingdoms ...) ; TODO map i32->kingdom, term negative, error over #xF9
-   (units ...) ; TODO map i32->unit, term negative, no cap
-   (commanders ...) ; TODO map i32->commander, term negative, no cap
-   (dominions ...) ; TODO map i32->dominion, term negative, no cap
-   (spells ...) ; TODO map i32->spell-data, term negative, no cap
-   (mercenaries ...) ; TODO map i32->mercenary-data, term negative, no cap, "something weird" in comments
+   (lands (negative-terminated-map :key-type p:i32 :value-type land)) ; TODO error over #x5E0
+   (kingdoms (negative-terminated-map :key-type p:i32 :value-type kingdom)) ; TODO error over #xF9
+   (units (negative-terminated-map :key-type p:i32 :value-type unit))
+   (commanders (negative-terminated-map :key-type p:i32 :value-type commander))
+   (dominions (negative-terminated-map :key-type p:i32 :value-type dominion))
+   (spells (negative-terminated-map :key-type p:i32 :value-type spell-data))
+   (mercenaries (negative-terminated-map :key-type p:i32 :value-type mercenary-data)) ; NOTE: Go code comments "something weird"
    (merc-unknown (raw-bytes :length 100))
-   (enchantments ...) ; TODO map i32->enchantment-data, term negative, no cap
+   (enchantments (negative-terminated-map :key-type p:i32 :value-type enchantment-data))
    (items (raw-bytes :length 1000))
    (war-data (raw-bytes :length 40000)) ; what??
    (heroes (variable-length-list :length-type p:i32 :value-type p:i16))
