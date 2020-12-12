@@ -90,7 +90,7 @@
 
 (define-binary-class commander ()
   ;; lot of unknown fields.
-  ((name p:dom-string-term)
+  ((name p:string-term)
    ;; first some u32
    (unk-32-00 p:u32) (unk-32-01 p:u32) (unk-32-02 p:u32) (unk-32-03 p:u32)
    (unk-32-04 p:u32) (unk-32-05 p:u32)
@@ -118,7 +118,7 @@
 (define-binary-class dominion ()
   ((sentinel (p:sentinel :type p:u16 :expected 12346))
    (b08l06 (raw-bytes :length 6))
-   (name p:dom-string-term)
+   (name p:string-term)
    (unk-u32-00 p:u32)
    (unk-u32-01 p:u32)
    (unk-map (length-capped-terminated-map :key-type p:i32 :value-type p:i32 :terminator 0 :max-length 64))))
@@ -135,6 +135,8 @@
 ;;; TODO: End-stats. Eight lists of i16, with a single prefixing length.
 ;;; Not interleaved. Actual length is 200 times prefix.
 ;;; Maybe corresponds to score graphs?
+
+(define-binary-type rxor-50 () (p:string-rxor :length 50)) ; used in fatherland, can't pass keys for nested types
 
 (define-binary-class fatherland ()
   ;; The top-level structure of the file
@@ -154,7 +156,7 @@
    (items (raw-bytes :length 1000))
    (war-data (raw-bytes :length 40000)) ; what??
    (heroes (variable-length-list :length-type p:i32 :value-type p:i16))
-   (unk-rolling ...) ; TODO 200 rolling-mask strings, 50 bytes each
+   (unk-rolling (fixed-length-list :length 200 :value-type rxor-50))
    (end-stats end-stats)
    (event-occurrences ...) ; TODO first a value which must be >= 4474. Then either 1000 events, or (if the value was exactly 4475) an i32 saying how many events there are. Each event is an i16.
    (delayed-events-sentinel (p:sentinel :type p:i32 :expected 4480))
@@ -171,11 +173,11 @@
    (realm-id p:i32)
    (unk-i32-02 p:i32)
    (unk-i32-03 p:i32)
-   (game-name p:dom-string-term)
-   (password p:dom-string-rxor-term)
-   (master-password p:dom-string-rxor-term)
+   (game-name p:string-term)
+   (password p:string-rxor-term)
+   (master-password p:string-rxor-term)
    (turn-key p:i32)
-   (sentinel (p:sentinel :type p:i32 :expected 12346)))) ; TODO assert is 12346
+   (sentinel (p:sentinel :type p:i32 :expected 12346))))
 
 ;;; TODO: Kingdom. Bunch of unknown stuff here. Fixed length, though.
 

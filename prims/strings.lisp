@@ -5,10 +5,10 @@
   (:import-from #:com.gigamonkeys.id3v2
                 #:generic-string #:generic-terminated-string)
   (:export
-   #:dom-string
-   #:dom-string-term
-   #:dom-string-rxor
-   #:dom-string-rxor-term))
+   #:string
+   #:string-term
+   #:string-rxor
+   #:string-rxor-term))
 (in-package #:dominions-parser/prims/strings)
 
 ;;; According to the Go code, Dominions has both terminated and fixed-length
@@ -29,10 +29,10 @@
 ;;; Fixed-mask strings
 (define-binary-type 4f-masked-char () (masked-byte-char :mask #x4f))
 
-(define-binary-type dom-string (length)
+(define-binary-type string (length)
   (generic-string :length length :character-type '4f-masked-char))
 
-(define-binary-type dom-string-term ()
+(define-binary-type string-term ()
   (generic-terminated-string :terminator (code-char 0) :character-type 'masked-byte-char))
 
 ;;; -----
@@ -49,7 +49,7 @@
 
 ;;; TODO re-implement with a masked-byte-char? Would still need to have a custom
 ;;; string wrapper though, to roll the mask. Might not help much.
-(define-binary-type dom-string-rxor (length)
+(define-binary-type string-rxor (length)
   (:reader (in)
            (with-output-to-string (s)
              (loop repeat length
@@ -64,7 +64,7 @@
                  for code = (logxor mask (char-code char))
                  do (write-byte code out))))
 
-(define-binary-type dom-string-rxor-term ()
+(define-binary-type string-rxor-term ()
   (:reader (in)
            (with-output-to-string (s)
              (loop for mask = +ROLLING-MASK-INITIAL+ then (roll-mask code mask)
