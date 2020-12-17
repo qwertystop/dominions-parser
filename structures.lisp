@@ -14,7 +14,11 @@
 ;;; and also the sparse array (single terminator, multiple rules for skipping or
 ;;; discarding values based on keys). Try to reduce that down to fewer, more
 ;;; parametrizable maps.
-;;; GENERAL TODO: A bunch of things defined as "types" that it might be nice to have as classes? Or that might not be necessary.
+;;; GENERAL TODO: A bunch of things defined as "types" that it might be nice to
+;;; have as classes? Or that might not be necessary.
+;;; TODO: raw-bytes is redundant with fixed-length-list, and fixed-length-list
+;;; could reasonably return an array instead of a list. Pare down the
+;;; dependencies.
 
 (define-binary-type dom-sparse-array (filter)
   ;;; Sparse array: paired (i32, byte) until key is negative, sometimes skipping data.
@@ -67,7 +71,8 @@
            (loop for (key . value) in values
                  do (progn (write-value key-type out key)
                            (write-value value-type out value))
-                 finally (write-value key-type out -1)))) ; TODO if we save the specific terminator, use that.
+                 ;; TODO if we save the specific terminator, use that instead of -1
+                 finally (write-value key-type out -1))))
 
 (define-binary-type fixed-length-list (length value-type)
   ;; Array of fixed size, determined by outside context.
@@ -175,12 +180,71 @@
    (turn-key p:i32)
    (sentinel (p:sentinel :type 'p:i32 :expected 12346))))
 
-;;; TODO: Kingdom. Bunch of unknown stuff here. Go code doesn't even save most of it, just discards.
+(define-binary-class kingdom ()
+  ;; NOTE: Go code doesn't even save most of the unknowns, just discards.
+  ((sentinel-1 (p:sentinel :type 'p:i16 :expected 12346))
+   (unk-i32-00 p:i32)
+   (unk-28x16 (fixed-length-list :length 28 :type 'p:u16))
+   (unk-varlen-u16 (variable-length-list :length-type 'p:i32 :value-type 'p:u16))
+   (unk-29x16 (fixed-length-list :length 29 :type 'p:u16))
+   (leader-name p:string)
+   (unk-9-bytes (raw-bytes :length 9))
+   ;; these divisions into blocks are from the Go
+   (unk-81x16 (fixed-length-list :length 81 :type 'p:u16))
+   (unk-u16 p:u16)
+   (unk-200x16-a (fixed-length-list :length 200 :type 'p:u16))
+   (unk-200x16-b (fixed-length-list :length 200 :type 'p:u16))
+   (unk-i32-01 p:i32)))
 
-;;; TODO: Land
-;;; TODO: Mercenary data
-;;; TODO: Newlord
-;;; TODO: Settings
+;;; TODO: Land. Go code has two different reads based on a "treatAsFatherland"
+;;; bool that doesn't seem to be part of the file, just the context. I think the
+;;; false case is (part of?) the 2h file, rather than the trn file.
+
+(define-binary-class mercenary-data ()
+  ((name p:string)
+   (unk-3x16 (fixed-length-list :length 3 :value-type 'p:u16))
+   (unk-15x16 (fixed-length-list :length 15 :value-type 'p:u16))
+   (unk-5x16 (fixed-length-list :length 5 :value-type 'p:u16)) ; NOTE: Go code has these five as individual
+   (sentinel (p:sentinel :type 'p:i16 :expected 26812))))
+
+(define-binary-class newlord ()
+  ((header header)
+   (unk-u32-00 p:u32)
+   (unk-u32-01 p:u32)
+   (unit unit)
+   (commander commander)
+   (dominion dominion)
+   (unk-u32-02 p:u32)))
+
+(define-binary-class game-mod ()
+  ((major-version p:i16)
+   (minor-version p:i16)
+   (name p:string)
+   (unk-u32-00 p:u32)
+   (unk-u32-01 p:u32)))
+
+(define-binary-class settings ()
+  ((mode p:u8)
+   (unk-u8-00 p:u8)
+   (autoplay p:u8)
+   (strength-of-indies p:u8)
+   (site-frequency p:u8)
+   (event-frequency p:u8)
+   (hall-of-fame-size p:u8)
+   (research-difficulty p:u8)
+   (map-wrap p:u8)
+   (winner-id p:u8)
+   (unk-u8-01 p:u8)
+   ;; TODO victory mode has a counter and then a bunch of different possible
+   ;; reads depending on its value. Also, game-era is inserted in the middle of
+   ;; the counter-dependent stuff. Tagged class?
+   (victory-mode-settings ...)
+   (unk-i32-00 p:i32)
+   (sail-distance p:i32)
+   (mods (variable-length-list :length-type 'p:i16 :value-type 'game-mod))
+   (map-picture p:string)
+   ;; NOTE: Go code reads colors as 4xi32, then converts to u32, then to float32.
+   (colors (fixed-length-list :length 4 :value-type 'p:i32))))
 
 (define-binary-class spell-data ()
   ;; Go code reads as arrays.
