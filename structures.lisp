@@ -67,7 +67,7 @@
                  until (< key 0) ; TODO should it save the specific terminator?
                  for value = (read-value value-type in)
                  collecting (cons key value)))
-  (:writer (out pairs)
+  (:writer (out values)
            (loop for (key . value) in values
                  do (progn (write-value key-type out key)
                            (write-value value-type out value))
@@ -108,10 +108,35 @@
    (unk-byte-array (raw-bytes :length 51)) ; Go code notes "46 + 5" without clarification?
    (unk-16-25 p:u16)))
 
-;;; TODO: Delayed events. Three lists of i32, interleaved, with a single prefixing length.
+;;; Delayed events. Three lists of i32, interleaved, with a single prefixing length.
 ;;; That is, read one i32, then read that many i32 into each of "base", "turn", and "lunar".
 ;;; TODO implement as a class? can't be done with current macros but can still
 ;;; use the same read/write interface, maybe.
+(define-binary-type delayed-events ()
+  (:reader (in)
+           (let ((size (read-value 'p:i32 in)))
+             (loop repeat size
+                   ;; TODO double-check loop syntax, maybe roll outer let into loop?
+                   collecting (read-value 'p:i32 in) into base
+                   collecting (read-value 'p:i32 in) into turn
+                   collecting (read-value 'p:i32 in) into lunar
+                   return `((:size size) (:base base) (:turn turn) (:lunar lunar)))))
+  (:writer (out value)
+           (destructuring-bind ((:size size) (:base base) (:turn turn) (:lunar lunar)) value
+             (write-value 'p:i32 out size)
+             (loop for b in base
+                   for t in turn
+                   for l in lunar
+                   do (progn
+                        (write-value 'p:i32 out b)
+                        (write-value 'p:i32 out t)
+                        (write-value 'p:i32 out l))))))
+;; alternate definition for delayed-events, less code to maintain, but structure
+;; is maybe not as nice to work with, depending on what the three fields
+;; actually *mean*.
+;; TODO pick one of these two.
+;; (define-binary-type event-triple () (fixed-length-list :length 3 :value-type 'p:i32))
+;; (define-binary-type delayed-events () (variable-length-list :length-type 'p:i32 :value-type 'event-triple))
 
 (define-binary-class dominion ()
   ((sentinel (p:sentinel :type 'p:u16 :expected 12346))
@@ -129,9 +154,23 @@
    (unk-5x32 (fixed-length-list :length 5 :value-type 'p:i32))
    (unk-i16-06 p:i16)))
 
-;;; TODO: End-stats. Eight lists of i16, with a single prefixing length.
+;;; End-stats. Eight lists of i16, with a single prefixing length.
 ;;; Not interleaved. Actual length is 200 times prefix.
 ;;; Maybe corresponds to score graphs?
+(define-binary-type end-stats ()
+  (:reader (in)
+           (let* ((size (read-value 'p:i16 in))
+                  (real-size (* 200 size)))
+             (list size
+                   (loop repeat 8
+                         with real-size = (* 200 size)
+                         collecting (read-value 'fixed-length-list in :length real-size :value-type 'p:i16)))))
+  (:writer (out value)
+           (destructuring-bind (size stats) value
+             (write-value 'p:i16 out size)
+             (loop for stat-list in stats
+                   with real-size = (* 200 size)
+                   do (write-value 'fixed-length-list out stat-list :length real-size :value-type 'p:i16)))))
 
 (define-binary-type rxor-50 () (p:string-rxor :length 50)) ; used in fatherland, can't pass keys for nested types
 
@@ -155,7 +194,7 @@
    (merc-unknown (raw-bytes :length 100))
    (enchantments (negative-terminated-map :key-type 'p:i32 :value-type 'enchantment-data))
    (items (raw-bytes :length 1000))
-   (war-data (raw-bytes :length 40000)) ; what??
+   (war-data (raw-bytes :length 40000)) ; what?? all the battles, maybe? but that doesn't make sense as fixed-size.
    (heroes (variable-length-list :length-type 'p:i32 :value-type 'p:i16))
    (unk-rolling (fixed-length-list :length 200 :value-type 'rxor-50))
    (end-stats end-stats)
