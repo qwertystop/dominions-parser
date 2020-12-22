@@ -9,16 +9,47 @@
 (in-package #:dominions-parser/structures)
 
 ;;; GENERAL TODO: There's one kind of map used in dominion (single terminator,
-;;; or auto-terminate at max length), two more used in fatherland (any negative
-;;; is terminator, error rather than auto-term at max length, or no max length),
-;;; and also the sparse array (single terminator, multiple rules for skipping or
-;;; discarding values based on keys). Try to reduce that down to fewer, more
-;;; parametrizable maps.
+;;; or auto-terminate at max length), more used in fatherland (any negative is
+;;; terminator, error rather than auto-term at max length, no max length, and
+;;; calendars), and also the sparse array (single terminator, multiple rules for
+;;; skipping or discarding values based on keys). Try to reduce that down to
+;;; fewer, more parametrizable maps.
 ;;; GENERAL TODO: A bunch of things defined as "types" that it might be nice to
 ;;; have as classes? Or that might not be necessary.
 ;;; TODO: raw-bytes is redundant with fixed-length-list, and fixed-length-list
 ;;; could reasonably return an array instead of a list. Pare down the
 ;;; dependencies.
+
+
+;;; Map reduction planning notes:
+;;; Variations:
+;;; 1. sparse-array has: specific-value terminator, range to not read a value
+;;; and go to next key, other range to read a value and ignore it.
+;;; 2. length-capped-terminated-map has: specific-value terminator, max-length terminator
+;;; 3. negative-terminated-map has: range terminator
+;;; 4. calendars has: range terminator to end immediately, other range terminator
+;;; to end after reading next value, concluding signature.
+;;; Commonalities of readers:
+;;; - All readers are a loop
+;;; - Three read loops open with "for key = (read-value key-type in)"
+;;;   - length-capped-terminated-map needs a repeat before that, though
+;;; - All read loops then have an until with some predicate
+;;; - Three read loops then have a "for value = (read-value value-type in)" and
+;;; then collect that in a dotted pair with the key
+;;;   - dom-sparse-array instead only reads sometimes, so its read expression is
+;;;   more complex
+;;; - calendars has a second until after the collector (need to check syntax
+;;; there) and a finally. Others have nothing after collector.
+;;; Commonalities of writers:
+;;; - loop for key . value in values
+;;;   - calendars doesn't bother to extract because key and value are the same
+;;;   type, but that's fixable
+;;; - length-capped-terminated-map discards excess length here
+;;; - in three cases, write key and value.
+;;;   - dom-sparse-array handles possible value skips here.
+;;; - all of them have a finally to write some kind of terminator, of varying complexity
+;;; TODO write macros for map-reader and map-writer
+
 
 (define-binary-type dom-sparse-array (filter)
   ;;; Sparse array: paired (i32, byte) until key is negative, sometimes skipping data.
@@ -26,17 +57,18 @@
   ;; - discard any negative key without reading a value
   ;; - discard any key >= filter, but read-and-discard the value byte
   ;; - only end on a key of -1
-  ;; my slightly different implementation allows looking at the discarded stuff without altering the writeback.
+  ;; My slightly different implementation allows looking at the discarded stuff
+  ;; without altering the writeback. As such, it currently ignores the filter.
+  ;; might be better to note the skip in metadata somehow?
   (:reader (in)
-           (loop for key = (read-value 'p:i32)
+           (loop for key = (read-value 'p:i32 in)
                  until (eql key -1)
-                 collecting (if (>= key 0)
-                                (cons key (read-value 'raw-bytes in :length 1))
-                                (cons key 'nil))))
+                 for value = (if (>= key 0) (read-value 'raw-bytes in :length 1) nil)
+                 collecting (cons key value)))
   (:writer (out pairs)
            (loop for (key . value) in pairs
                  do (write-value 'p:i32 out key)
-                 when (< key filter) do (write-value 'raw-bytes out value :length 1)
+                 when (< key 0) do (write-value 'raw-bytes out value :length 1)
                  finally (write-value 'p:i32 out -1))))
 
 (define-binary-type length-capped-terminated-map (key-type value-type terminator max-length)
@@ -73,6 +105,29 @@
                            (write-value value-type out value))
                  ;; TODO if we save the specific terminator, use that instead of -1
                  finally (write-value key-type out -1))))
+
+(define-binary-type calendars ()
+  ;; One key to two values, terminate before reading values for negative key,
+  ;; terminate after reading values for key over 999, expect a signature #x205B
+  ;; after termination. Used in fatherland.
+  (:reader (in)
+           ;; TODO test that this double-until works properly
+           ;; TODO this should be able to fold up into the other maps with some work
+           (loop for key = (read-value 'b:i32 in)
+                 until (< key 0)
+                 for value = (read-value 'fixed-length-list in :length 2 :value-type 'b:i32)
+                 collecting (cons key value)
+                 until (> key 999)
+                 finally (read-value 'b:sentinel :type 'b:i32 :expected #x205B)))
+  (:writer (out values)
+           ;;; TODO there are multiple possible terminations and we have no way
+           ;;; to distinguish explicit-terminator (negative key) from implicit
+           ;;; (high key). This code produces INCORRECT OUTPUT for the latter.
+           ;;; Fix.
+           (loop for triple in values
+                 do (write-value 'fixed-length-list out triple :length 3 :value-type 'b:i32)
+                 finally (write-value 'fixed-length-list out '(-1 #x205B) :length 2 :value-type 'b:i32))))
+
 
 (define-binary-type fixed-length-list (length value-type)
   ;; Array of fixed size, determined by outside context.
@@ -174,14 +229,11 @@
 
 (define-binary-type rxor-50 () (p:string-rxor :length 50)) ; used in fatherland, can't pass keys for nested types
 
-;;; TODO "calendars" (paired, interleaved, shared-keys maps? multiple
-;;; termination rules, post-termination signature. used in fatherland)
-
 (define-binary-class fatherland ()
   ;; The top-level structure of the file
   ((header header)
    (settings settings)
-   (calendars calendars) ; TODO two maps interleaved, sharing keys, term negative or >999, signature #x205B after term
+   (calendars calendars)
    (zoom ...) ; TODO uncertain of type; Go uses "binary.LittleEndian"
    ;; NOTE: in the Go, the lands read here are the "treatAsFatherland" variant.
    (lands (negative-terminated-map :key-type 'p:i32 :value-type 'land)) ; TODO error over #x5E0
