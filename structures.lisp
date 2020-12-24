@@ -8,12 +8,6 @@
   (:export)) ; TODO
 (in-package #:dominions-parser/structures)
 
-;;; GENERAL TODO: There's one kind of map used in dominion (single terminator,
-;;; or auto-terminate at max length), more used in fatherland (any negative is
-;;; terminator, error rather than auto-term at max length, no max length, and
-;;; calendars), and also the sparse array (single terminator, multiple rules for
-;;; skipping or discarding values based on keys). Try to reduce that down to
-;;; fewer, more parametrizable maps.
 ;;; GENERAL TODO: A bunch of things defined as "types" that it might be nice to
 ;;; have as classes? Or that might not be necessary.
 ;;; TODO: raw-bytes is redundant with fixed-length-list, and fixed-length-list
@@ -21,35 +15,38 @@
 ;;; dependencies.
 
 
-;;; Map reduction planning notes:
-;;; Variations:
-;;; 1. sparse-array has: specific-value terminator, range to not read a value
-;;; and go to next key, other range to read a value and ignore it.
-;;; 2. length-capped-terminated-map has: specific-value terminator, max-length terminator
-;;; 3. negative-terminated-map has: range terminator
-;;; 4. calendars has: range terminator to end immediately, other range terminator
-;;; to end after reading next value, concluding signature.
-;;; Commonalities of readers:
-;;; - All readers are a loop
-;;; - Three read loops open with "for key = (read-value key-type in)"
-;;;   - length-capped-terminated-map needs a repeat before that, though
-;;; - All read loops then have an until with some predicate
-;;; - Three read loops then have a "for value = (read-value value-type in)" and
-;;; then collect that in a dotted pair with the key
-;;;   - dom-sparse-array instead only reads sometimes, so its read expression is
-;;;   more complex
-;;; - calendars has a second until after the collector (need to check syntax
-;;; there) and a finally. Others have nothing after collector.
-;;; Commonalities of writers:
-;;; - loop for key . value in values
-;;;   - calendars doesn't bother to extract because key and value are the same
-;;;   type, but that's fixable
-;;; - length-capped-terminated-map discards excess length here
-;;; - in three cases, write key and value.
-;;;   - dom-sparse-array handles possible value skips here.
-;;; - all of them have a finally to write some kind of terminator, of varying complexity
-;;; TODO write macros for map-reader and map-writer
+(defmacro map-reader (&key (key 'key-type) (val 'value-type) pre-read key-check post-read (stream 'in))
+  "Common code to four different map readers"
+  (declare (type (or symbol list) key val stream-name)
+           (type list pre-read key-check post-read))
+  (flet ((type-to-reader (s)
+           (if (or (symbolp s) (eql (first s) 'quote))
+               `(read-value ,s ,stream)
+               s)))
+    (let ((key-reader (type-to-reader key))
+          (val-reader (type-to-reader val)))
+      `(loop ,@pre-read
+             for key = ,key-reader
+             until ,key-check
+             for value = ,val-reader
+             collecting (cons key value)
+             ,@post-read))))
 
+(defmacro map-writer (&key (key 'key-type) (val 'value-type) pre-write epilogue (stream 'out) (input 'items))
+  "Common code to four different map writers"
+  (declare (type (or symbol list) key val stream input)
+           (type list pre-write epilogue))
+  (flet ((type-to-writer (s i)
+           (print (list s i))
+           (if (or (symbolp s) (eql (first s) 'quote))
+               `(write-value ,s ,stream ,i)
+               s)))
+    (let ((key-writer (type-to-writer key 'key))
+          (val-writer (type-to-writer val 'value)))
+      `(loop for (key . value) in ,input
+             ,@pre-write
+             do (progn ,key-writer ,val-writer)
+             finally ,@epilogue))))
 
 (define-binary-type dom-sparse-array (filter)
   ;;; Sparse array: paired (i32, byte) until key is negative, sometimes skipping data.
@@ -59,52 +56,42 @@
   ;; - only end on a key of -1
   ;; My slightly different implementation allows looking at the discarded stuff
   ;; without altering the writeback. As such, it currently ignores the filter.
-  ;; might be better to note the skip in metadata somehow?
+  ;; Might be better to note the skip in metadata somehow?
   (:reader (in)
-           (loop for key = (read-value 'p:i32 in)
-                 until (eql key -1)
-                 for value = (if (>= key 0) (read-value 'raw-bytes in :length 1) nil)
-                 collecting (cons key value)))
-  (:writer (out pairs)
-           (loop for (key . value) in pairs
-                 do (write-value 'p:i32 out key)
-                 when (< key 0) do (write-value 'raw-bytes out value :length 1)
-                 finally (write-value 'p:i32 out -1))))
+           (map-reader
+            :key 'p:i32 :key-check (eql key 1)
+            :val (if (>= key 0) (read-value 'raw-bytes in :length 1) nil)))
+  (:writer (out items)
+           (map-writer
+            :key 'p:i32
+            :val (unless (< key 0)
+                         (write-value 'raw-bytes out value :length 1))
+            :epilogue ((write-value 'p:i32 out -1)))))
 
 (define-binary-type length-capped-terminated-map (key-type value-type terminator max-length)
   ;; Key-value pairs, terminated by a specific key of known type OR by reaching a set max length.
   ;; If max length is reached, no terminator is present.
   ;; Used specifically in dominion structure
   (:reader (in)
-           (loop repeat max-length
-                 for key = (read-value key-type in)
-                 until (eql key terminator)
-                 for value = (read-value value-type in)
-                 collecting (cons key value)))
-  (:writer (out pairs)
+           (map-reader :pre-read (repeat max-length) :key-check (eql key terminator)))
+  (:writer (out items)
            ;; TODO currently silently discards input in excess of max length
-           (loop for (key . value) in pairs
-                 for count from 1 upto max-length
-                 do (progn (write-value key-type out key)
-                           (write-value value-type out value))
-                 finally (if (> max-length count) ; list shorter than max
-                             (write-value key-type out terminator)))))
+           (map-writer
+            :pre-write (for count from 1 upto max-length)
+            :epilogue ((if (> max-length count)
+                          (write-value key-type out terminator)))))
 
 (define-binary-type negative-terminated-map (key-type value-type)
   ;; Key-value pairs, terminated by any negative-number key (key-type must be numeric)
   ;; TODO Go code has *errors* if the length exceeds a limit
   ;; (rather than the auto-termination in length-capped-terminated-map)
+  ;; TODO should the terminator be preserved, or just write a -1? Currently the latter.
   (:reader (in)
-           (loop for key = (read-value key-type in)
-                 until (< key 0) ; TODO should it save the specific terminator?
-                 for value = (read-value value-type in)
-                 collecting (cons key value)))
+           (map-reader :key key-type :key-check (< key 0)))
   (:writer (out values)
-           (loop for (key . value) in values
-                 do (progn (write-value key-type out key)
-                           (write-value value-type out value))
-                 ;; TODO if we save the specific terminator, use that instead of -1
-                 finally (write-value key-type out -1))))
+           (map-writer :epilogue ((write-value key-type out -1)))))
+
+(define-binary-type i32-pair () (fixed-length-list :length 2 :value-type 'b:i32))
 
 (define-binary-type calendars ()
   ;; One key to two values, terminate before reading values for negative key,
@@ -112,21 +99,20 @@
   ;; after termination. Used in fatherland.
   (:reader (in)
            ;; TODO test that this double-until works properly
-           ;; TODO this should be able to fold up into the other maps with some work
-           (loop for key = (read-value 'b:i32 in)
-                 until (< key 0)
-                 for value = (read-value 'fixed-length-list in :length 2 :value-type 'b:i32)
-                 collecting (cons key value)
-                 until (> key 999)
-                 finally (read-value 'b:sentinel :type 'b:i32 :expected #x205B)))
+           (map-reader
+            :key 'p:i32
+            :key-check (< key 0)
+            :val 'i32-pair
+            :post-read (until (> key 999)
+                        finally (read-value 'p:sentinel :type 'p:i32 :expected #x205B))))
   (:writer (out values)
            ;;; TODO there are multiple possible terminations and we have no way
            ;;; to distinguish explicit-terminator (negative key) from implicit
            ;;; (high key). This code produces INCORRECT OUTPUT for the latter.
-           ;;; Fix.
-           (loop for triple in values
-                 do (write-value 'fixed-length-list out triple :length 3 :value-type 'b:i32)
-                 finally (write-value 'fixed-length-list out '(-1 #x205B) :length 2 :value-type 'b:i32))))
+           ;;; FIXME.
+           (map-writer
+            :key 'p:i32 :val 'i32-pair
+            :epilogue ((write-value 'i32-pair out '(-1 #x205B))))))
 
 
 (define-binary-type fixed-length-list (length value-type)
