@@ -1,18 +1,13 @@
 (defpackage #:dominions-parser/structures
   (:use #:cl)
   (:import-from #:com.gigamonkeys.binary-data
-                #:define-binary-type #:define-binary-class #:read-value #:write-value)
-  (:import-from #:com.gigamonkeys.id3v2
-                #:raw-bytes)
+                #:define-binary-type #:define-binary-class #:define-tagged-binary-class #:read-value #:write-value)
   (:local-nicknames (#:p #:dominions-parser/prims))
   (:export)) ; TODO
 (in-package #:dominions-parser/structures)
 
 ;;; GENERAL TODO: A bunch of things defined as "types" that it might be nice to
 ;;; have as classes? Or that might not be necessary.
-;;; TODO: raw-bytes is redundant with fixed-length-list, and fixed-length-list
-;;; could reasonably return an array instead of a list. Pare down the
-;;; dependencies.
 
 
 (defmacro map-reader (&key (key 'key-type) (val 'value-type) pre-read key-check post-read (stream 'in))
@@ -60,12 +55,12 @@
   (:reader (in)
            (map-reader
             :key 'p:i32 :key-check (eql key 1)
-            :val (if (>= key 0) (read-value 'raw-bytes in :length 1) nil)))
+            :val (if (>= key 0) (read-value 'p:u8 in) nil)))
   (:writer (out items)
            (map-writer
             :key 'p:i32
             :val (unless (< key 0)
-                         (write-value 'raw-bytes out value :length 1))
+                         (write-value 'p:u8 out value))
             :epilogue ((write-value 'p:i32 out -1)))))
 
 (define-binary-type length-capped-terminated-map (key-type value-type terminator max-length)
@@ -114,7 +109,11 @@
             :key 'p:i32 :val 'i32-pair
             :epilogue ((write-value 'i32-pair out '(-1 #x205B))))))
 
-
+;;; NOTE: read-sequence can (probably (significantly)) improve efficiency of the
+;;; two list readers, for unsigned integer lists where lisp can auto-handle the
+;;; reads, but it would complicate the code to special-case such things.
+;;; Consider if necessary. Maybe separate off an "array" type to be used for
+;;; such numeric cases.
 (define-binary-type fixed-length-list (length value-type)
   ;; Array of fixed size, determined by outside context.
   (:reader (in)
@@ -146,7 +145,7 @@
    (unk-16x16 (fixed-length-list :length 16 :value-type 'p:u16))
    (unk-5x32 (fixed-length-list :length 5 :value-type 'p:u32))
    (unk-9x16 (fixed-length-list :length 9 :value-type 'p:u16))
-   (unk-byte-array (raw-bytes :length 51)) ; Go code notes "46 + 5" without clarification?
+   (unk-byte-array (fixed-length-list :length 51 :value-type 'p:u8)) ; Go code notes "46 + 5" without clarification?
    (unk-16-25 p:u16)))
 
 ;;; Delayed events. Three lists of i32, interleaved, with a single prefixing length.
@@ -181,7 +180,7 @@
 
 (define-binary-class dominion ()
   ((sentinel (p:sentinel :type 'p:u16 :expected 12346))
-   (b08l06 (raw-bytes :length 6))
+   (b08l06 (fixed-length-list :length 6 :value-type 'p:u8))
    (name p:string-term)
    (unk-u32-00 p:u32)
    (unk-u32-01 p:u32)
@@ -229,10 +228,10 @@
    (dominions (negative-terminated-map :key-type 'p:i32 :value-type 'dominion))
    (spells (negative-terminated-map :key-type 'p:i32 :value-type 'spell-data))
    (mercenaries (negative-terminated-map :key-type 'p:i32 :value-type 'mercenary-data)) ; NOTE: Go code comments "something weird"
-   (merc-unknown (raw-bytes :length 100))
+   (merc-unknown (fixed-length-list :length 100 :value-type 'p:u8))
    (enchantments (negative-terminated-map :key-type 'p:i32 :value-type 'enchantment-data))
-   (items (raw-bytes :length 1000))
-   (war-data (raw-bytes :length 40000)) ; what?? all the battles, maybe? but that doesn't make sense as fixed-size.
+   (items (fixed-length-list :length 1000 :value-type 'p:u8))
+   (war-data (fixed-length-list :length 40000 :value-type 'p:u8)) ; what?? all the battles, maybe? but that doesn't make sense as fixed-size.
    (heroes (variable-length-list :length-type 'p:i32 :value-type 'p:i16))
    (unk-rolling (fixed-length-list :length 200 :value-type 'rxor-50))
    (end-stats end-stats)
@@ -242,7 +241,7 @@
    (closing-sentinel (p:sentinel :type 'p:i32 :expected 12346)))) ; TODO assert the file is over
 
 (define-binary-class header ()
-  ((signature (raw-bytes :length 6)) ; TODO assert is #x01 #x02 #x04 #x44 #x4F #x4D
+  ((signature (fixed-length-list :length 6 :value-type 'p:u8)) ; TODO assert is #x01 #x02 #x04 #x44 #x4F #x4D
    (user-id p:i32)
    (game-version p:i32) ; TODO assert is not too old? maybe? or at least warn.
    (turn-number p:i32)
@@ -265,7 +264,7 @@
    (unk-varlen-u16 (variable-length-list :length-type 'p:i32 :value-type 'p:u16))
    (unk-29x16 (fixed-length-list :length 29 :type 'p:u16))
    (leader-name p:string)
-   (unk-9-bytes (raw-bytes :length 9))
+   (unk-9-bytes (fixed-length-list :length 9 :value-type 'p:u8))
    ;; these divisions into blocks are from the Go
    (unk-81x16 (fixed-length-list :length 81 :type 'p:u16))
    (unk-u16 p:u16)
@@ -335,6 +334,6 @@
    (unk-14x16 (fixed-length-list :length 14 :value-type 'p:u16))
    ;; Go notes this u16 as separate from the previous array of 14
    (unk-16-b p:u16)
-   (unk-byte-00 (raw-bytes :length 1))
+   (unk-byte-00 (fixed-length-list :length 1 :value-type 'p:u8))
    (unk32-01 p:u32)
-   (unk-byte-01 (raw-bytes :length 1))))
+   (unk-byte-01 p:u8)))
