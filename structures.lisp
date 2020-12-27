@@ -32,7 +32,6 @@
   (declare (type (or symbol list) key val stream input)
            (type list pre-write epilogue))
   (flet ((type-to-writer (s i)
-           (print (list s i))
            (if (or (symbolp s) (eql (first s) 'quote))
                `(write-value ,s ,stream ,i)
                s)))
@@ -74,7 +73,7 @@
            (map-writer
             :pre-write (for count from 1 upto max-length)
             :epilogue ((if (> max-length count)
-                          (write-value key-type out terminator)))))
+                          (write-value key-type out terminator))))))
 
 (define-binary-type negative-terminated-map (key-type value-type)
   ;; Key-value pairs, terminated by any negative-number key (key-type must be numeric)
@@ -86,7 +85,7 @@
   (:writer (out values)
            (map-writer :epilogue ((write-value key-type out -1)))))
 
-(define-binary-type i32-pair () (fixed-length-list :length 2 :value-type 'b:i32))
+(define-binary-type i32-pair () (fixed-length-list :length 2 :value-type 'p:i32))
 
 (define-binary-type calendars ()
   ;; One key to two values, terminate before reading values for negative key,
@@ -100,7 +99,7 @@
             :val 'i32-pair
             :post-read (until (> key 999)
                         finally (read-value 'p:sentinel :type 'p:i32 :expected #x205B))))
-  (:writer (out values)
+  (:writer (out items)
            ;;; TODO there are multiple possible terminations and we have no way
            ;;; to distinguish explicit-terminator (negative key) from implicit
            ;;; (high key). This code produces INCORRECT OUTPUT for the latter.
@@ -148,35 +147,36 @@
    (unk-byte-array (fixed-length-list :length 51 :value-type 'p:u8)) ; Go code notes "46 + 5" without clarification?
    (unk-16-25 p:u16)))
 
-;;; Delayed events. Three lists of i32, interleaved, with a single prefixing length.
-;;; That is, read one i32, then read that many i32 into each of "base", "turn", and "lunar".
-;;; TODO implement as a class? can't be done with current macros but can still
-;;; use the same read/write interface, maybe.
 (define-binary-type delayed-events ()
+  ;;; Delayed events. Three lists of i32, interleaved, with a single prefixing
+  ;;; length. That is, read one i32, then read that many i32 into each of
+  ;;; "base", "turn", and "lunar".
+  ;;; TODO implement as a class? Can't be done with current macros but can still
+  ;;; use the same read/write interface, maybe.
   (:reader (in)
-           (let ((size (read-value 'p:i32 in)))
-             (loop repeat size
-                   ;; TODO double-check loop syntax, maybe roll outer let into loop?
-                   collecting (read-value 'p:i32 in) into base
-                   collecting (read-value 'p:i32 in) into turn
-                   collecting (read-value 'p:i32 in) into lunar
-                   return `((:size size) (:base base) (:turn turn) (:lunar lunar)))))
+           (loop with size = (read-value 'p:i32 in)
+                 repeat size
+                 for (a b c) = (read-value 'fixed-length-list :length 3 :value-type 'p:i32)
+                 collecting a into base
+                 collecting b into turn
+                 collecting c into lunar
+                 finally (return `(:size ,size :base ,base :turn ,turn :lunar ,lunar))))
   (:writer (out value)
-           (destructuring-bind ((:size size) (:base base) (:turn turn) (:lunar lunar)) value
+           (destructuring-bind (&key size base turn lunar) value
              (write-value 'p:i32 out size)
-             (loop for b in base
-                   for t in turn
-                   for l in lunar
+             (loop for a in base
+                   for b in turn
+                   for c in lunar
                    do (progn
+                        (write-value 'p:i32 out a)
                         (write-value 'p:i32 out b)
-                        (write-value 'p:i32 out t)
-                        (write-value 'p:i32 out l))))))
+                        (write-value 'p:i32 out c))))))
 ;; alternate definition for delayed-events, less code to maintain, but structure
 ;; is maybe not as nice to work with, depending on what the three fields
 ;; actually *mean*.
-;; TODO pick one of these two.
-;; (define-binary-type event-triple () (fixed-length-list :length 3 :value-type 'p:i32))
-;; (define-binary-type delayed-events () (variable-length-list :length-type 'p:i32 :value-type 'event-triple))
+;; TODO pick one of above or below.
+;; (define-binary-type i32-triple () (fixed-length-list :length 3 :value-type 'p:i32))
+;; (define-binary-type delayed-events () (variable-length-list :length-type 'p:i32 :value-type 'i32-triple))
 
 (define-binary-class dominion ()
   ((sentinel (p:sentinel :type 'p:u16 :expected 12346))
@@ -194,32 +194,37 @@
    (unk-5x32 (fixed-length-list :length 5 :value-type 'p:i32))
    (unk-i16-06 p:i16)))
 
-;;; End-stats. Eight lists of i16, with a single prefixing length.
-;;; Not interleaved. Actual length is 200 times prefix.
-;;; Maybe corresponds to score graphs?
 (define-binary-type end-stats ()
+  ;;; End-stats. Eight lists of i16, with a single prefixing length. Not
+  ;;; interleaved. Actual length is 200 times prefix.
+  ;;; Maybe corresponds to score graphs?
   (:reader (in)
            (let* ((size (read-value 'p:i16 in))
                   (real-size (* 200 size)))
-             (list size
+             (cons size
                    (loop repeat 8
-                         with real-size = (* 200 size)
-                         collecting (read-value 'fixed-length-list in :length real-size :value-type 'p:i16)))))
+                         collecting (read-value 'fixed-length-list in
+                                                :length real-size :value-type 'p:i16)))))
   (:writer (out value)
-           (destructuring-bind (size stats) value
+           (destructuring-bind (size &rest stats) value
              (write-value 'p:i16 out size)
              (loop for stat-list in stats
                    with real-size = (* 200 size)
-                   do (write-value 'fixed-length-list out stat-list :length real-size :value-type 'p:i16)))))
+                   do (write-value 'fixed-length-list out stat-list
+                                   :length real-size :value-type 'p:i16)))))
 
 (define-binary-type rxor-50 () (p:string-rxor :length 50)) ; used in fatherland, can't pass keys for nested types
+
+(define-tagged-binary-class event-occurrences ()
+  ;; TODO first a value which must be >= 4474. Then either 1000 events, or (if the value was exactly 4475) an i32 saying how many events there are. Each event is an i16.
+  ...) ; TODO
 
 (define-binary-class fatherland ()
   ;; The top-level structure of the file
   ((header header)
    (settings settings)
    (calendars calendars)
-   (zoom ...) ; TODO uncertain of type; Go uses "binary.LittleEndian"
+   (zoom p:f32) ; NOTE: little-endian, but this is a low-priority part of the parse.
    ;; NOTE: in the Go, the lands read here are the "treatAsFatherland" variant.
    (lands (negative-terminated-map :key-type 'p:i32 :value-type 'land)) ; TODO error over #x5E0
    (kingdoms (negative-terminated-map :key-type 'p:i32 :value-type 'kingdom)) ; TODO error over #xF9
@@ -235,7 +240,7 @@
    (heroes (variable-length-list :length-type 'p:i32 :value-type 'p:i16))
    (unk-rolling (fixed-length-list :length 200 :value-type 'rxor-50))
    (end-stats end-stats)
-   (event-occurrences ...) ; TODO first a value which must be >= 4474. Then either 1000 events, or (if the value was exactly 4475) an i32 saying how many events there are. Each event is an i16.
+   (event-occurrences event-occurrences)
    (delayed-events-sentinel (p:sentinel :type 'p:i32 :expected 4480))
    (delayed-events delayed-events)
    (closing-sentinel (p:sentinel :type 'p:i32 :expected 12346)))) ; TODO assert the file is over
