@@ -9,10 +9,11 @@
 ;;; GENERAL TODO: A bunch of things defined as "types" that it might be nice to
 ;;; have as classes? Or that might not be necessary.
 
+;;; TODO maybe separate out the more generic lists and maps from the rest
 
 (defmacro map-reader (&key (key 'key-type) (val 'value-type) pre-read key-check post-read (stream 'in))
   "Common code to four different map readers"
-  (declare (type (or symbol list) key val stream-name)
+  (declare (type (or symbol list) key val stream)
            (type list pre-read key-check post-read))
   (flet ((type-to-reader (s)
            (if (or (symbolp s) (eql (first s) 'quote))
@@ -82,7 +83,7 @@
   ;; TODO should the terminator be preserved, or just write a -1? Currently the latter.
   (:reader (in)
            (map-reader :key key-type :key-check (< key 0)))
-  (:writer (out values)
+  (:writer (out items)
            (map-writer :epilogue ((write-value key-type out -1)))))
 
 (define-binary-type i32-pair () (fixed-length-list :length 2 :value-type 'p:i32))
