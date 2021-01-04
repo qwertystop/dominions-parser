@@ -2,8 +2,6 @@
   (:use #:cl)
   (:import-from #:com.gigamonkeys.binary-data
                 #:define-binary-type #:read-value #:write-value)
-  (:import-from #:com.gigamonkeys.id3v2
-                #:raw-bytes)
   (:export #:u8 #:u16 #:u32 #:u64
            #:i8 #:i16 #:i32 #:i64
            #:f32 #:f32-special
@@ -93,8 +91,8 @@
 ;;; low-value cosmetic purposes, and the special ones not at all. Can probably
 ;;; afford to table this for now.
 ;;; So here's placeholders to read the proper amount of data. (TODO)
-(define-binary-type f32 () (raw-bytes :length 4))
-(define-binary-type f32-special () (raw-bytes :length 4))
+(define-binary-type f32 () u32)
+(define-binary-type f32-special () u32)
 ;;; (define-binary-type f32 ()
 ;;;   (:reader (in)
 ;;;            ...)
