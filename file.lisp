@@ -1,8 +1,8 @@
-(uiop/package:define-package #:binparse/generics
+(uiop/package:define-package #:dominions-parser/file
   (:use #:common-lisp)
   (:import-from #:com.gigamonkeys.binary-data #:read-value #:write-value)
   (:export #:read-file #:write-file))
-(in-package #:binparse/generics)
+(in-package #:dominions-parser/file)
 
 ;;; TODO these could be more concise as macros or with some other way of splicing in keys
 

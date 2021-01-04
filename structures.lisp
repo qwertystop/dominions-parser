@@ -2,7 +2,7 @@
   (:use #:cl)
   (:import-from #:com.gigamonkeys.binary-data
                 #:define-binary-type #:define-binary-class #:define-tagged-binary-class #:read-value #:write-value)
-  (:local-nicknames (#:p #:dominions-parser/prims))
+  (:local-nicknames (#:p #:dominions-parser/prims/all))
   (:export)) ; TODO
 (in-package #:dominions-parser/structures)
 
