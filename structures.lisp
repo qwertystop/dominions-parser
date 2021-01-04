@@ -217,8 +217,24 @@
 (define-binary-type rxor-50 () (p:string-rxor :length 50)) ; used in fatherland, can't pass keys for nested types
 
 (define-tagged-binary-class event-occurrences ()
-  ;; TODO first a value which must be >= 4474. Then either 1000 events, or (if the value was exactly 4475) an i32 saying how many events there are. Each event is an i16.
-  ...) ; TODO
+  ;; first a value which must be >= 4474. Then either 1000 events, or (if the
+  ;; value was exactly 4475) an i32 saying how many events there are. Each event
+  ;; is an i16.
+  ((prefix p:i32))
+  (:dispatch (event-occurrences-dispatch prefix)))
+
+(defun event-occurrences-dispatch (prefix)
+  (declare (type (signed-byte 32) prefix))
+  (cond
+    ((< prefix 4474) (error "event-occurrences prefix must be >= 4474"))
+    ((= prefix 4475) 'event-occurrences-fixed-size)
+    (t 'event-occurrences-variable-size)))
+
+(define-binary-class event-occurrences-fixed-size (event-occurrences)
+  ((events (fixed-length-list :length 1000 :value-type 'p:i16))))
+
+(define-binary-class event-occurrences-variable-size (event-occurrences)
+  ((events (variable-length-list :length-type 'p:i32 :value-type 'p:i16))))
 
 (define-binary-class fatherland ()
   ;; The top-level structure of the file
@@ -281,6 +297,8 @@
 ;;; TODO: Land. Go code has two different reads based on a "treatAsFatherland"
 ;;; bool that doesn't seem to be part of the file, just the context. I think the
 ;;; false case is (part of?) the 2h file, rather than the trn file.
+;;; There are large shared chunks. It may make sense to define a binary-class
+;;; for each shared chunk and then build the other two out of those.
 
 (define-binary-class mercenary-data ()
   ((name p:string)
@@ -305,6 +323,58 @@
    (unk-u32-00 p:u32)
    (unk-u32-01 p:u32)))
 
+(define-tagged-binary-class victory-mode-settings ()
+  ;; Victory mode has a counter and then a bunch of different possible
+  ;; reads depending on its exact value. Also, game-era is inserted in the middle of
+  ;; the counter-dependent stuff.
+  ((counter p:i16))
+  (:dispatch (victory-mode-dispatch counter)))
+
+;;; Go code used the following dispatch:
+;;; n = (counter * 2) + 8: if it's over 5, read six i16;
+;;; if it's over 6, read an additional (n-6) i16.
+;;; then, regardless of counter, read era settings.
+;;; then, n = (original-counter * 4) + 5: if it's over 0, read one i32
+;;; (known-purpose) then another (n-1) (unknown-purpose)
+;;; then, if the original counter is > -1, read that many strings (yes, that
+;;; means possibly zero) (apparently this is very rare; purpose of strings
+;;; unknown)
+;;; So as far as the actual combinations go, there's actually only three options:
+;;; < -1: none of the optional reads
+;;; = -1: first and third optional reads
+;;; > -1: all four reads
+(defun victory-mode-dispatch (counter)
+  (declare (type (signed-byte 16) counter))
+  (cond
+    ((< counter -1) 'victory-mode-settings-type-a)
+    ((= counter -1) 'victory-mode-settings-type-b)
+    ((> counter -1) 'victory-mode-settings-type-c)))
+
+(define-binary-class victory-mode-settings-type-a (victory-mode-settings)
+  ((game-era p:i16)))
+
+(define-binary-class victory-mode-settings-type-b (victory-mode-settings)
+  ((victory-mode p:i16)
+   (victory-requirement p:i16)
+   (gold-multiplier p:i16)
+   (resource-multiplier p:i16)
+   (supply-multiplier p:i16) ; NOTE: Suspect there will also be a recruit-multiplier in dom5
+   (game-era p:i16)
+   (flags p:u32) ; NOTE: Go has it as i32, but if it's flags, signed seems weird
+   (unk-varlen-u32 (fixed-length-list :length (+ (* counter 4) 4) :value-type 'p:u32))))
+
+(define-binary-class victory-mode-settings-type-c (victory-mode-settings)
+  ((victory-mode p:i16)
+   (victory-requirement p:i16)
+   (gold-multiplier p:i16)
+   (resource-multiplier p:i16)
+   (supply-multiplier p:i16) ; NOTE: Suspect there will also be a recruit-multiplier in dom5
+   (unk-varlen-i16 (fixed-length-list :length (+ (* counter 2) 2) :value-type 'p:i16))
+   (game-era p:i16)
+   (flags p:u32) ; NOTE: Go has it as i32, but if it's flags, signed seems weird
+   (unk-varlen-u32 (fixed-length-list :length (+ (* counter 4) 4) :value-type 'p:u32))
+   (unk-varlen-str (fixed-length-list :length counter :value-type 'p:string))))
+
 (define-binary-class settings ()
   ((mode p:u8)
    (unk-u8-00 p:u8)
@@ -317,10 +387,7 @@
    (map-wrap p:u8)
    (winner-id p:u8)
    (unk-u8-01 p:u8)
-   ;; TODO victory mode has a counter and then a bunch of different possible
-   ;; reads depending on its value. Also, game-era is inserted in the middle of
-   ;; the counter-dependent stuff. Tagged class?
-   (victory-mode-settings ...)
+   (victory-mode-settings victory-mode-settings)
    (unk-i32-00 p:i32)
    (sail-distance p:i32)
    (mods (variable-length-list :length-type 'p:i16 :value-type 'game-mod))
