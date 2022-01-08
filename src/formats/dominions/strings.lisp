@@ -1,15 +1,15 @@
-(defpackage #:dominions-parser/prims/strings
-  (:use #:common-lisp)
-  (:import-from #:com.gigamonkeys.binary-data
+(defpackage "binary-parser/src/formats/dominions/strings"
+  (:use "common-lisp")
+  (:import-from "com.gigamonkeys.binary-data"
                 #:define-binary-type)
-  (:import-from #:com.gigamonkeys.id3v2
+  (:import-from "com.gigamonkeys.id3v2"
                 #:generic-string #:generic-terminated-string)
   (:export
    #:string
    #:string-term
    #:string-rxor
    #:string-rxor-term))
-(in-package #:dominions-parser/prims/strings)
+(in-package "binary-parser/src/formats/dominions/strings")
 
 ;;; According to the Go code, Dominions has both terminated and fixed-length
 ;;; strings, and uses either a fixed or rolling mask to XOR each character
